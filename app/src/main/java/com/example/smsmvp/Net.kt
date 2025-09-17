@@ -2,6 +2,9 @@ package com.example.smsmvp
 
 import android.telephony.SmsManager
 import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -159,13 +162,63 @@ object Net {
         }
     }
     
-    private fun sendSms(phoneNumber: String, message: String) {
+    private fun sendSms(phoneNumber: String, message: String, taskId: String? = null) {
         try {
             val smsManager = SmsManager.getDefault()
             smsManager.sendTextMessage(phoneNumber, null, message, null, null)
             Log.d(TAG, "SMS sent to $phoneNumber: $message")
+            
+            // Report success to server if we have a task ID
+            taskId?.let { 
+                CoroutineScope(Dispatchers.IO).launch {
+                    reportTaskStatus(it, "sent", "SMS sent successfully")
+                }
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to send SMS", e)
+            
+            // Report failure to server if we have a task ID
+            taskId?.let { 
+                CoroutineScope(Dispatchers.IO).launch {
+                    reportTaskStatus(it, "failed", e.message ?: "Unknown error")
+                }
+            }
+        }
+    }
+    
+    private suspend fun reportTaskStatus(taskId: String, result: String, info: String) {
+        val json = JSONObject().apply {
+            put("device_id", DEVICE_ID)
+            put("task_id", taskId)
+            put("result", result)
+            put("info", info)
+        }
+        
+        val requestBody = json.toString().toRequestBody("application/json".toMediaType())
+        val url = "$SERVER_URL/status"
+        
+        val request = Request.Builder()
+            .url(url)
+            .post(requestBody)
+            .build()
+        
+        HttpLogger.logRequest(url, "POST", json.toString())
+        
+        try {
+            val response = client.newCall(request).execute()
+            val responseBodyString = response.body?.string() ?: ""
+            
+            if (response.isSuccessful) {
+                Log.d(TAG, "Task status reported successfully")
+                HttpLogger.logResponse(url, response.code, responseBodyString)
+            } else {
+                Log.e(TAG, "Failed to report task status: ${response.code}")
+                HttpLogger.logResponse(url, response.code, responseBodyString, "HTTP ${response.code}")
+            }
+            response.close()
+        } catch (e: IOException) {
+            Log.e(TAG, "Network error reporting task status", e)
+            HttpLogger.logResponse(url, 0, null, e.message)
         }
     }
 }

@@ -53,9 +53,16 @@ class PollService : Service() {
     private fun startPolling() {
         pollingJob?.cancel()
         pollingJob = CoroutineScope(Dispatchers.IO).launch {
+            // Register device on startup
+            try {
+                Net.registerDevice()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to register device", e)
+            }
+            
             while (isActive) {
                 try {
-                    Net.pollForCommands()
+                    Net.pollForTasks()
                     delay(30000) // Poll every 30 seconds
                 } catch (e: Exception) {
                     Log.e(TAG, "Polling error", e)
