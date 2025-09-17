@@ -23,43 +23,62 @@ object Net {
         }
         
         val requestBody = json.toString().toRequestBody("application/json".toMediaType())
+        val url = "$SERVER_URL/sms/received"
         
         val request = Request.Builder()
-            .url("$SERVER_URL/sms/received")
+            .url(url)
             .post(requestBody)
             .build()
         
+        // Log the request
+        HttpLogger.logRequest(url, "POST", json.toString())
+        
         try {
             val response = client.newCall(request).execute()
+            val responseBodyString = response.body?.string() ?: ""
+            
             if (response.isSuccessful) {
                 Log.d(TAG, "SMS sent to server successfully")
+                HttpLogger.logResponse(url, response.code, responseBodyString)
             } else {
                 Log.e(TAG, "Failed to send SMS to server: ${response.code}")
+                HttpLogger.logResponse(url, response.code, responseBodyString, "HTTP ${response.code}")
             }
             response.close()
         } catch (e: IOException) {
             Log.e(TAG, "Network error sending SMS to server", e)
+            HttpLogger.logResponse(url, 0, null, e.message)
             throw e
         }
     }
     
     suspend fun pollForCommands() {
+        val url = "$SERVER_URL/commands/poll"
         val request = Request.Builder()
-            .url("$SERVER_URL/commands/poll")
+            .url(url)
             .get()
             .build()
         
+        // Log the request
+        HttpLogger.logRequest(url, "GET")
+        
         try {
             val response = client.newCall(request).execute()
+            val responseBodyString = response.body?.string() ?: ""
+            
             if (response.isSuccessful) {
-                val responseBody = response.body?.string()
-                responseBody?.let { processCommands(it) }
+                HttpLogger.logResponse(url, response.code, responseBodyString)
+                if (responseBodyString.isNotEmpty()) {
+                    processCommands(responseBodyString)
+                }
             } else {
                 Log.e(TAG, "Failed to poll commands: ${response.code}")
+                HttpLogger.logResponse(url, response.code, responseBodyString, "HTTP ${response.code}")
             }
             response.close()
         } catch (e: IOException) {
             Log.e(TAG, "Network error polling commands", e)
+            HttpLogger.logResponse(url, 0, null, e.message)
             throw e
         }
     }
