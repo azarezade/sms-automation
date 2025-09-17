@@ -15,15 +15,19 @@ object Net {
     // Server URL for SMS automation
     private const val SERVER_URL = "http://95.217.125.133:8010"
     
-    suspend fun sendSmsToServer(sender: String, body: String) {
+    // Device ID - you can change this to identify your phone
+    private const val DEVICE_ID = "android_phone_1"
+    
+    suspend fun sendIncomingSmsToServer(sender: String, body: String): String? {
         val json = JSONObject().apply {
-            put("from", sender)
-            put("body", body)
-            put("timestamp", System.currentTimeMillis())
+            put("device_id", DEVICE_ID)
+            put("frm", sender)
+            put("text", body)
+            put("received_at", System.currentTimeMillis() / 1000.0)
         }
         
         val requestBody = json.toString().toRequestBody("application/json".toMediaType())
-        val url = "$SERVER_URL/sms/received"
+        val url = "$SERVER_URL/incoming"
         
         val request = Request.Builder()
             .url(url)
@@ -38,22 +42,36 @@ object Net {
             val responseBodyString = response.body?.string() ?: ""
             
             if (response.isSuccessful) {
-                Log.d(TAG, "SMS sent to server successfully")
+                Log.d(TAG, "Incoming SMS sent to server successfully")
                 HttpLogger.logResponse(url, response.code, responseBodyString)
+                
+                // Parse response to check if we should reply
+                return try {
+                    val responseJson = JSONObject(responseBodyString)
+                    if (responseJson.optBoolean("should_reply", false)) {
+                        responseJson.optString("reply_text", null)
+                    } else {
+                        null
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to parse server response", e)
+                    null
+                }
             } else {
-                Log.e(TAG, "Failed to send SMS to server: ${response.code}")
+                Log.e(TAG, "Failed to send incoming SMS to server: ${response.code}")
                 HttpLogger.logResponse(url, response.code, responseBodyString, "HTTP ${response.code}")
             }
             response.close()
         } catch (e: IOException) {
-            Log.e(TAG, "Network error sending SMS to server", e)
+            Log.e(TAG, "Network error sending incoming SMS to server", e)
             HttpLogger.logResponse(url, 0, null, e.message)
             throw e
         }
+        return null
     }
     
-    suspend fun pollForCommands() {
-        val url = "$SERVER_URL/commands/poll"
+    suspend fun pollForTasks() {
+        val url = "$SERVER_URL/tasks?device_id=$DEVICE_ID&max_items=5"
         val request = Request.Builder()
             .url(url)
             .get()
@@ -69,44 +87,75 @@ object Net {
             if (response.isSuccessful) {
                 HttpLogger.logResponse(url, response.code, responseBodyString)
                 if (responseBodyString.isNotEmpty()) {
-                    processCommands(responseBodyString)
+                    processTasks(responseBodyString)
                 }
             } else {
-                Log.e(TAG, "Failed to poll commands: ${response.code}")
+                Log.e(TAG, "Failed to poll tasks: ${response.code}")
                 HttpLogger.logResponse(url, response.code, responseBodyString, "HTTP ${response.code}")
             }
             response.close()
         } catch (e: IOException) {
-            Log.e(TAG, "Network error polling commands", e)
+            Log.e(TAG, "Network error polling tasks", e)
             HttpLogger.logResponse(url, 0, null, e.message)
             throw e
         }
     }
     
-    private fun processCommands(jsonResponse: String) {
+    suspend fun registerDevice() {
+        val json = JSONObject().apply {
+            put("device_id", DEVICE_ID)
+        }
+        
+        val requestBody = json.toString().toRequestBody("application/json".toMediaType())
+        val url = "$SERVER_URL/register"
+        
+        val request = Request.Builder()
+            .url(url)
+            .post(requestBody)
+            .build()
+        
+        HttpLogger.logRequest(url, "POST", json.toString())
+        
         try {
-            val json = JSONObject(jsonResponse)
-            val commands = json.optJSONArray("commands")
+            val response = client.newCall(request).execute()
+            val responseBodyString = response.body?.string() ?: ""
             
-            commands?.let {
-                for (i in 0 until it.length()) {
-                    val command = it.getJSONObject(i)
-                    val action = command.getString("action")
-                    
-                    when (action) {
-                        "send_sms" -> {
-                            val to = command.getString("to")
-                            val message = command.getString("message")
-                            sendSms(to, message)
-                        }
-                        else -> {
-                            Log.w(TAG, "Unknown command action: $action")
-                        }
+            if (response.isSuccessful) {
+                Log.d(TAG, "Device registered successfully")
+                HttpLogger.logResponse(url, response.code, responseBodyString)
+            } else {
+                Log.e(TAG, "Failed to register device: ${response.code}")
+                HttpLogger.logResponse(url, response.code, responseBodyString, "HTTP ${response.code}")
+            }
+            response.close()
+        } catch (e: IOException) {
+            Log.e(TAG, "Network error registering device", e)
+            HttpLogger.logResponse(url, 0, null, e.message)
+        }
+    }
+    
+    private fun processTasks(jsonResponse: String) {
+        try {
+            val tasks = org.json.JSONArray(jsonResponse)
+            
+            for (i in 0 until tasks.length()) {
+                val task = tasks.getJSONObject(i)
+                val taskType = task.getString("type")
+                val taskId = task.getString("task_id")
+                
+                when (taskType) {
+                    "send_sms" -> {
+                        val to = task.getString("to")
+                        val text = task.getString("text")
+                        sendSms(to, text, taskId)
+                    }
+                    else -> {
+                        Log.w(TAG, "Unknown task type: $taskType")
                     }
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error processing commands", e)
+            Log.e(TAG, "Error processing tasks", e)
         }
     }
     
