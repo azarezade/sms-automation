@@ -139,7 +139,11 @@ object Net {
     
     private fun processTasks(jsonResponse: String) {
         try {
-            val tasks = org.json.JSONArray(jsonResponse)
+            // Parse the response object first
+            val responseObj = JSONObject(jsonResponse)
+            val tasks = responseObj.getJSONArray("tasks")
+            
+            Log.d(TAG, "Processing ${tasks.length()} task(s)")
             
             for (i in 0 until tasks.length()) {
                 val task = tasks.getJSONObject(i)
@@ -150,6 +154,7 @@ object Net {
                     "send_sms" -> {
                         val to = task.getString("to")
                         val text = task.getString("text")
+                        Log.d(TAG, "Sending SMS to $to: $text")
                         sendSms(to, text, taskId)
                     }
                     else -> {
@@ -158,7 +163,7 @@ object Net {
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error processing tasks", e)
+            Log.e(TAG, "Error processing tasks: ${e.message}", e)
         }
     }
     
